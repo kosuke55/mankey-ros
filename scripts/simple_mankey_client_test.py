@@ -1,16 +1,20 @@
 #! /usr/bin/env python
-from mankey_ros.srv import *
 
-import rospy
-import cv2
+import argparse
 import os
-from sensor_msgs.msg import Image, RegionOfInterest
+
+import cv2
+import rospy
+from sensor_msgs.msg import RegionOfInterest
 from cv_bridge import CvBridge, CvBridgeError
 
+from mankey_ros.srv import *
 
-def main():
+
+def main(visualize):
     rospy.wait_for_service('detect_keypoints')
-    detect_keypoint = rospy.ServiceProxy('detect_keypoints', MankeyKeypointDetection)
+    detect_keypoint = rospy.ServiceProxy(
+        'detect_keypoints', MankeyKeypointDetection)
 
     # Get the test data path
     project_path = os.path.join(os.path.dirname(__file__), os.path.pardir)
@@ -39,6 +43,40 @@ def main():
     response = detect_keypoint(request)
     print response
 
+    if visualize:
+        import numpy as np
+        import open3d as o3d
+        import skrobot
+        import trimesh
+
+        color = o3d.geometry.Image(cv_rgb)
+        depth = o3d.geometry.Image(cv_depth)
+        rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(color, depth)
+
+        pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+            rgbd, o3d.camera.PinholeCameraIntrinsic(
+                o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
+
+        viewer = skrobot.viewers.TrimeshSceneViewer(resolution=(640, 480))
+        trimesh_pc = trimesh.PointCloud(
+            np.asarray(
+                pcd.points), np.asarray(
+                pcd.colors))
+        viewer.scene.add_geometry(trimesh_pc)
+        viewer.show()
+
+        for keypoint in response.keypoints_camera_frame:
+            keypoint_sphere = skrobot.models.Sphere(0.01, color=[255, 0, 0])
+            keypoint_sphere.newcoords(skrobot.coordinates.Coordinates(
+                pos=[keypoint.x, keypoint.y, keypoint.z]))
+            viewer.add(keypoint_sphere)
+
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--visualize', '-v', type=int,
+        default=0)
+    args = parser.parse_args()
+    visualize = args.visualize
+    main(visualize)
